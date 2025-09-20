@@ -12,7 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 @SpringBootApplication
 public class MailSafeApplication {
-	private static final Logger logger = LoggerFactory.getLogger(MailSafeApplication.class);
+	public static final Logger logger = LoggerFactory.getLogger(MailSafeApplication.class);
 	public static void main(String[] args) {
 		ConfigurableApplicationContext con = SpringApplication.run(MailSafeApplication.class, args);
 		logger.info("MailSafe is running");

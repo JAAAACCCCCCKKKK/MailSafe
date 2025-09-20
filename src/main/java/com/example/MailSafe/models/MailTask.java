@@ -43,6 +43,9 @@ public class MailTask {
     @Column(name = "source_ip")
     private String sourceIp;
 
+    @Column(name = "risk")
+    private int risk;
+
     public void setId(UUID id) { this.id = id; }
     public MailTaskStatus getStatus() { return status; }
     public void setStatus(MailTaskStatus status) { this.status = status; }
@@ -88,6 +91,14 @@ public class MailTask {
 
     public void setSourceAddr(String sourceAddr) {
         this.sourceAddr = sourceAddr;
+    }
+
+    public int getRisk(){
+        return risk;
+    }
+
+    public void setRisk(int risk){
+        this.risk = risk;
     }
 
 }

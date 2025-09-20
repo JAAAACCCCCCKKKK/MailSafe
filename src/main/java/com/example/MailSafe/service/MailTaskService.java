@@ -50,11 +50,20 @@ public class MailTaskService {
         attachment.setContentType(attachmentDto.getContentType());
         attachment.setData(attachmentDto.getData());
         attachment.setMailTask(task);
+        task.addAttachment(attachment);
+        task.setUpdatedAt(OffsetDateTime.now());
+        mailTaskRepository.save(task);
         return attachmentRepository.save(attachment);
     }
 
     @Transactional
     public MailTask getTaskById(UUID taskId) {
         return mailTaskRepository.findById(taskId).orElse(null);
+    }
+
+    @Transactional
+    public MailTask saveTask(MailTask task) {
+        task.setUpdatedAt(OffsetDateTime.now());
+        return mailTaskRepository.save(task);
     }
 }
