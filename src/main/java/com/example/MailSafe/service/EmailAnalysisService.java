@@ -62,7 +62,11 @@ public class EmailAnalysisService {
         }
 
         if(useAI){
-            score += AIAnalysis(task.getRawEmail());
+            try {
+                score += AIAnalysis(task.getRawEmail());
+            } catch (UnsupportedOperationException e) {
+                MailSafeApplication.logger.error("please configure OpenAI API key to enable AI analysis.");
+            }
         }
 
         if (containsJs(rawEmail)){
@@ -200,36 +204,38 @@ public class EmailAnalysisService {
     }
 
 
-    private int AIAnalysis(String rawEmail){
-        // 模型与 endpoint 可用环境变量覆盖
-        final String endpoint = de.get("OLLAMA_ENDPOINT", "http://localhost:11434/api/chat");
-        final String model = de.get("OLLAMA_MODEL", "qwen2.5:7b-instruct");
+    private int AIAnalysis(String rawEmail) throws UnsupportedOperationException {
+        // 从环境变量获取 API key 和模型名
+        final String apiKey = de.get("OPENAI_API_KEY");
+        if(apiKey==null || apiKey.isEmpty()){
+            throw new UnsupportedOperationException("No OpenAI API key configured.");
+        }
+        final String endpoint = "https://api.openai.com/v1/chat/completions";
+        final String model = de.get("OPENAI_MODEL","gpt-4o-mini");
 
-        // 限制传给模型的邮件长度，避免超时或费用（这里只截 4KB）
+        // 限制输入长度（避免超时或高费用）
         final String truncated = truncateUtf8(rawEmail, 4096);
 
-        // system prompt 强制模型只返回 JSON 结构，便于解析
-        final String systemPrompt = "你是邮件安全分析员。判断给定邮件是否为钓鱼/包含恶意代码。" +
-                "严格**只**返回 JSON，不要输出任何文本或解释，不要包含任何非英语（美国）字符，格式如下：" +
-                "{\"risk\":0|1|2,\"reasons\":[\"...\",\"...\"]}。 " +
-                "risk 含义：0=安全，1=可疑，2=高风险。";
+        // system prompt：只允许返回 JSON
+        final String systemPrompt = "You are an email security analyzer. "
+                + "Determine if the given email is phishing or contains malicious code. "
+                + "Strictly return JSON only, with no explanation, in the following format: "
+                + "{\"risk\":0|1|2,\"reasons\":[\"...\"]}. "
+                + "risk: 0 = safe, 1 = suspicious, 2 = high risk.";
 
-        final String userPrompt = "邮件正文:\n" + truncated;
+        final String userPrompt = "Email content:\n" + truncated;
 
         try {
             ObjectMapper om = new ObjectMapper();
 
-            Map<String,Object> req = new LinkedHashMap<>();
+            // 构造请求体
+            Map<String, Object> req = new LinkedHashMap<>();
             req.put("model", model);
-            req.put("stream", false);
+            req.put("temperature", 0.1);
 
-            Map<String,Object> options = new HashMap<>();
-            options.put("temperature", 0.1);
-            req.put("options", options);
-
-            List<Map<String,String>> messages = new ArrayList<>();
-            messages.add(Map.of("role","system","content", systemPrompt));
-            messages.add(Map.of("role","user","content", userPrompt));
+            List<Map<String, String>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+            messages.add(Map.of("role", "user", "content", userPrompt));
             req.put("messages", messages);
 
             String jsonReq = om.writeValueAsString(req);
@@ -238,56 +244,39 @@ public class EmailAnalysisService {
                     .uri(URI.create(endpoint))
                     .timeout(Duration.ofSeconds(30))
                     .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(jsonReq))
                     .build();
 
-            HttpClient client = null;
-            try {
-                HttpClient.newBuilder()
-                        .connectTimeout(Duration.ofSeconds(5))
-                        .build();
-            } catch (Exception e) {
-                MailSafeApplication.logger.error("LLM API error: " + e.getMessage());
-            }
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5))
+                    .build();
 
             HttpResponse<String> resp = client.send(httpReq, HttpResponse.BodyHandlers.ofString());
 
             if (resp.statusCode() != 200) {
-                System.err.println("LLM API error code=" + resp.statusCode() + " body=" + resp.body());
+                MailSafeApplication.logger.error("OpenAI API error code=" + resp.statusCode() + " body=" + resp.body());
                 return 1; // 保守：可疑
             }
 
             String content = null;
             try {
                 JsonNode root = om.readTree(resp.body());
-                // 优先取 message.content
-                if (root.has("message") && root.path("message").has("content")) {
-                    content = root.path("message").path("content").asText();
-                } else if (root.has("choices") && root.path("choices").isArray() && root.path("choices").size() > 0) {
-                    // 兼容 OpenAI 风格
-                    JsonNode first = root.path("choices").get(0);
-                    if (first.has("message") && first.path("message").has("content")) {
-                        content = first.path("message").path("content").asText();
-                    } else if (first.has("text")) {
-                        content = first.path("text").asText();
-                    }
-                } else {
-                    // 兜底把整个 body 当作 content
-                    content = resp.body();
+                JsonNode choices = root.path("choices");
+                if (choices.isArray() && choices.size() > 0) {
+                    content = choices.get(0).path("message").path("content").asText();
                 }
             } catch (Exception e) {
-                // 解析 response JSON 失败，尝试把 body 当作 content
-                content = resp.body();
+                content = resp.body(); // fallback
             }
 
             if (content == null) content = "";
 
-            // content 应该是 JSON，尝试解析出 risk 字段
+            // 解析 JSON 里的 risk
             try {
                 JsonNode result = om.readTree(content);
                 int risk = result.path("risk").asInt(Integer.MIN_VALUE);
                 if (risk == Integer.MIN_VALUE) {
-                    // 未找到 risk 字段，尝试用正则抽取 "risk":n
                     int heur = tryExtractRiskHeuristically(content);
                     return heur < 0 ? 1 : heur;
                 }
@@ -295,16 +284,16 @@ public class EmailAnalysisService {
                 if (risk > 2) risk = 2;
                 return risk;
             } catch (Exception e) {
-                // 模型没有严格返回 JSON，尝试从文本中抽取
                 int heur = tryExtractRiskHeuristically(content);
                 return heur < 0 ? 1 : heur;
             }
+
         } catch (Exception e) {
-            e.printStackTrace();
-            // 出错时返回保守值
-            return 1;
+            MailSafeApplication.logger.error("AI analysis error: " + e.getMessage());
+            return 1; // 出错时返回“可疑”
         }
     }
+
 
     // 辅助：截断字符串（按字符数）
     private static String truncateUtf8(String s, int maxChars) {
