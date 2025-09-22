@@ -4,6 +4,7 @@ import com.example.MailSafe.MailSafeApplication;
 import com.example.MailSafe.models.Attachment;
 import com.example.MailSafe.models.MailTask;
 import com.example.MailSafe.utils.SpfChecker;
+import io.github.cdimascio.dotenv.Dotenv;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class EmailAnalysisService {
+    Dotenv de = Dotenv.load();
     public int analyzeEmail(MailTask task, boolean useAI) {
         int score = 0;
         String rawEmail = task.getRawEmail();
@@ -73,7 +75,9 @@ public class EmailAnalysisService {
 
     private boolean isSuspiciousUrl(String url) {
         //get API key from .env
-        String apiKey = System.getenv("GOOG_SAFE_BROWSING_API_KEY");
+        Dotenv dev = Dotenv.load();
+
+        String apiKey = dev.get("GOOG_SAFE_BROWSING_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
             MailSafeApplication.logger.warn("No GSB API key found.");
             return false;
@@ -125,11 +129,14 @@ public class EmailAnalysisService {
     }
 
     private boolean isMaliciousFile(byte[] fileData) {
-        String host = System.getenv().getOrDefault("CLAMAV_HOST", "localhost");
+        String host = de.get("CLAMAV_HOST");
+        if (host == null || host.isEmpty()) {
+            host = "localhost";
+        }
         int port;
         try {
-            port = Integer.parseInt(System.getenv().getOrDefault("CLAMAV_PORT", "3310"));
-        } catch (NumberFormatException e) {
+            port = Integer.parseInt(de.get("CLAMAV_PORT"));
+        } catch (NumberFormatException | NullPointerException e) {
             port = 3310;
         }
 
@@ -195,15 +202,15 @@ public class EmailAnalysisService {
 
     private int AIAnalysis(String rawEmail){
         // 模型与 endpoint 可用环境变量覆盖
-        final String endpoint = System.getenv().getOrDefault("OLLAMA_ENDPOINT", "http://localhost:11434/api/chat");
-        final String model = System.getenv().getOrDefault("OLLAMA_MODEL", "qwen2.5:7b-instruct");
+        final String endpoint = de.get("OLLAMA_ENDPOINT", "http://localhost:11434/api/chat");
+        final String model = de.get("OLLAMA_MODEL", "qwen2.5:7b-instruct");
 
         // 限制传给模型的邮件长度，避免超时或费用（这里只截 4KB）
         final String truncated = truncateUtf8(rawEmail, 4096);
 
         // system prompt 强制模型只返回 JSON 结构，便于解析
         final String systemPrompt = "你是邮件安全分析员。判断给定邮件是否为钓鱼/包含恶意代码。" +
-                "严格**只**返回 JSON，不要输出任何文本或解释，格式如下：" +
+                "严格**只**返回 JSON，不要输出任何文本或解释，不要包含任何非英语（美国）字符，格式如下：" +
                 "{\"risk\":0|1|2,\"reasons\":[\"...\",\"...\"]}。 " +
                 "risk 含义：0=安全，1=可疑，2=高风险。";
 
