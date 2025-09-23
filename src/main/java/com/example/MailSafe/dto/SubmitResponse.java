@@ -12,6 +12,7 @@ public class SubmitResponse {
     public SubmitResponse(UUID taskId, MailTaskStatus status, String[] attachments) {
         this.taskId = taskId;
         this.status = status;
+        this.attachments = attachments;
     }
     public UUID getTaskId() { return taskId; }
     public MailTaskStatus getStatus() { return status; }

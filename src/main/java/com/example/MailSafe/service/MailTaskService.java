@@ -9,9 +9,7 @@ import com.example.MailSafe.repo.MailTaskRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
-import java.util.Base64;
 import java.util.UUID;
 
 @Service
@@ -25,15 +23,13 @@ public class MailTaskService {
     }
 
     @Transactional
-    public MailTask createPendingTask(String rawEmailBase64, String messageId, String sourceAddr, String sourceIp) {
-        // 解码 Base64 → 存储 MIME 原文
-        String rawEmail = new String(Base64.getDecoder().decode(rawEmailBase64), StandardCharsets.UTF_8);
-
+    public MailTask createPendingTask(String rawEmail, String messageId, String sourceAddr, String sourceIp) {
         MailTask task = new MailTask();
         task.setId(UUID.randomUUID());
         task.setStatus(MailTaskStatus.PENDING);
         task.setRawEmail(rawEmail);
         task.setMessageId(messageId);
+        task.setSourceAddr(sourceAddr);
         task.setSourceIp(sourceIp);
 
         OffsetDateTime now = OffsetDateTime.now();
