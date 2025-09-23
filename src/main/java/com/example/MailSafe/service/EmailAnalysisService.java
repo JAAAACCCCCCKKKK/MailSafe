@@ -3,6 +3,7 @@ package com.example.MailSafe.service;
 import com.example.MailSafe.MailSafeApplication;
 import com.example.MailSafe.models.Attachment;
 import com.example.MailSafe.models.MailTask;
+import com.example.MailSafe.models.SuspiciousSender;
 import com.example.MailSafe.utils.SpfChecker;
 import io.github.cdimascio.dotenv.Dotenv;
 import org.jsoup.nodes.Element;
@@ -31,6 +32,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class EmailAnalysisService {
+    private final ReportService reportService;
+    public EmailAnalysisService(ReportService reportService) {
+        this.reportService = reportService;
+    }
     Dotenv de = Dotenv.load();
     public int analyzeEmail(MailTask task, boolean useAI) {
         int score = 0;
@@ -346,7 +351,9 @@ public class EmailAnalysisService {
     }
 
     private boolean isUnreliableSource(String sourceAddr, String sourceIp){
-        return !SpfChecker.isIpAllowed(sourceAddr, sourceIp) || isIpInSpamhaus(sourceIp);
+        return !SpfChecker.isIpAllowed(sourceAddr, sourceIp)
+                || isIpInSpamhaus(sourceIp)
+                || !reportService.getSuspiciousSender(sourceAddr,sourceIp).isEmpty();
     }
 
     private boolean isIpInSpamhaus(String ip) {
@@ -367,4 +374,5 @@ public class EmailAnalysisService {
         }
         return false;
     }
+
 }

@@ -100,7 +100,7 @@ public class ReceiveMail {
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
-    @GetMapping("/resilt/{taskId}")
+    @GetMapping("/result/{taskId}")
     public ResponseEntity<AnalysisResponse> getResult(@PathVariable UUID taskId) {
         if(taskId==null){
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);

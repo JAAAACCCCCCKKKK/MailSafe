@@ -1,6 +1,9 @@
 package com.example.MailSafe.dto;
 
 import com.example.MailSafe.models.Attachment;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,10 +14,13 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SubmitRequest {
+    @NotNull
+    @NotBlank
     private String rawEmailBase64;
 
     /** 可选元数据 */
     private String messageId;
+    @Email
     private String sourceAddr;
     private String sourceIp;
 
