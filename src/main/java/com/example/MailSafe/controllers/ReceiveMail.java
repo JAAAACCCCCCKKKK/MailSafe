@@ -7,11 +7,17 @@ import com.example.MailSafe.models.MailTask;
 import com.example.MailSafe.models.MailTaskStatus;
 import com.example.MailSafe.service.EmailAnalysisService;
 import com.example.MailSafe.service.MailTaskService;
+import com.example.MailSafe.utils.EmailParser;
+import jakarta.mail.MessagingException;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,27 +33,58 @@ public class ReceiveMail {
         this.analysisService = analysisService;
     }
 
-    @PostMapping("/submit")
-    public ResponseEntity<SubmitResponse> submit(@Valid @RequestBody SubmitRequest request) {
-        if (request.getRawEmailBase64() == null || request.getRawEmailBase64().isEmpty()) {
+    @PostMapping(value = "/submit", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<SubmitResponse> submit(
+            @RequestPart(value = "rawEmail", required = false) String rawEmail,
+            @RequestPart(value = "emlFile", required = false) MultipartFile emlFile) {
+        if ((rawEmail == null || rawEmail.isBlank()) && (emlFile == null || emlFile.isEmpty())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new SubmitResponse(null, null, null));
         }
-        MailTask task = taskService.createPendingTask(
-                request.getRawEmailBase64(),
-                request.getMessageId(),
-                request.getSourceAddr(),
-                request.getSourceIp()
-        );
 
-        //处理附件
-        ArrayList<String> attachmentFileNames = new ArrayList<>();
-        if (request.getAttachments()!=null&&!request.getAttachments().isEmpty()){
-            for(AttachmentDto attachmentDto:request.getAttachments()){
-                Attachment att = taskService.appendAttachmentToTask(task,attachmentDto);
-                attachmentFileNames.add(att.getFileName());
+        byte[] rawEmailBytes;
+        if (rawEmail != null && !rawEmail.isBlank()) {
+            rawEmailBytes = rawEmail.getBytes(StandardCharsets.UTF_8);
+        } else {
+            try {
+                rawEmailBytes = emlFile.getBytes();
+            } catch (IOException e) {
+                MailSafeApplication.logger.error("Failed to read uploaded email file", e);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new SubmitResponse(null, null, null));
             }
         }
-        // 同步返回任务序列号（UUID）与初始状态（PENDING=待处理）
+        return handleSubmission(rawEmailBytes);
+    }
+
+    @PostMapping(value = "/submit", consumes = {MediaType.TEXT_PLAIN_VALUE, "message/rfc822", MediaType.APPLICATION_OCTET_STREAM_VALUE})
+    public ResponseEntity<SubmitResponse> submitRaw(@RequestBody byte[] rawEmailBytes) {
+        if (rawEmailBytes == null || rawEmailBytes.length == 0) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new SubmitResponse(null, null, null));
+        }
+        return handleSubmission(rawEmailBytes);
+    }
+
+    private ResponseEntity<SubmitResponse> handleSubmission(byte[] rawEmailBytes) {
+        EmailParser.ParsedEmail parsedEmail;
+        try {
+            parsedEmail = EmailParser.parse(rawEmailBytes);
+        } catch (MessagingException | IOException e) {
+            MailSafeApplication.logger.error("Failed to parse email", e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new SubmitResponse(null, null, null));
+        }
+
+        MailTask task = taskService.createPendingTask(
+                parsedEmail.rawEmail(),
+                parsedEmail.messageId(),
+                parsedEmail.sourceAddr(),
+                parsedEmail.sourceIp()
+        );
+
+        ArrayList<String> attachmentFileNames = new ArrayList<>();
+        for (AttachmentDto attachmentDto : parsedEmail.attachments()) {
+            Attachment att = taskService.appendAttachmentToTask(task, attachmentDto);
+            attachmentFileNames.add(att.getFileName());
+        }
+
         SubmitResponse response = new SubmitResponse(
                 task.getId(),
                 task.getStatus(),
