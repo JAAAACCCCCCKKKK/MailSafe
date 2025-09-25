@@ -119,8 +119,13 @@ public final class EmailParser {
         }
     }
 
-    public record ParsedEmail(String rawEmail, String messageId, String sourceAddr, String sourceIp,
-                              List<AttachmentDto> attachments) {
+    public record ParsedEmail(
+                              String rawEmail,
+                              String messageId,
+                              String sourceAddr,
+                              String sourceIp,
+                              List<AttachmentDto> attachments
+    ) {
     }
 }
 
