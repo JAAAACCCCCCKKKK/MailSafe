@@ -3,11 +3,10 @@ package com.example.MailSafe.service;
 import com.example.MailSafe.MailSafeApplication;
 import com.example.MailSafe.models.Attachment;
 import com.example.MailSafe.models.MailTask;
-import com.example.MailSafe.models.SuspiciousSender;
 import com.example.MailSafe.utils.SpfChecker;
-import io.github.cdimascio.dotenv.Dotenv;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -32,11 +31,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class EmailAnalysisService {
+    private final String GoogSafeBrowsingApiKey;
+    private final String OpenAiApiKey;
+    private final String OpenAiModel;
+    private final String ClamAvHost;
+    private final int ClamAvPort;
     private final ReportService reportService;
-    public EmailAnalysisService(ReportService reportService) {
+    public EmailAnalysisService(ReportService reportService,
+                                @Value("${OPENAI_API_KEY}") String openAiApiKey,
+                                @Value("${OPENAI_MODEL:gpt-3.5-turbo}") String openAiModel,
+                                @Value("${CLAMAV_HOST:localhost}") String clamAvHost,
+                                @Value("${CLAMAV_PORT:3310}")  int clamAvPort,
+                                @Value("${GOOG_SAFE_BROWSING_API_KEY}") String googSafeBrowsingApiKey) {
+        this.GoogSafeBrowsingApiKey = googSafeBrowsingApiKey;
+        this.OpenAiApiKey = openAiApiKey;
+        this.OpenAiModel = openAiModel;
+        this.ClamAvHost = clamAvHost;
+        this.ClamAvPort = clamAvPort;
         this.reportService = reportService;
     }
-    Dotenv de = Dotenv.load();
     public int analyzeEmail(MailTask task, boolean useAI) {
         int score = 0;
         String rawEmail = task.getRawEmail();
@@ -83,10 +96,8 @@ public class EmailAnalysisService {
     }
 
     private boolean isSuspiciousUrl(String url) {
-        //get API key from .env
-        Dotenv dev = Dotenv.load();
 
-        String apiKey = dev.get("GOOG_SAFE_BROWSING_API_KEY");
+        String apiKey = this.GoogSafeBrowsingApiKey;
         if (apiKey == null || apiKey.isEmpty()) {
             MailSafeApplication.logger.warn("No GSB API key found.");
             return false;
@@ -132,28 +143,17 @@ public class EmailAnalysisService {
                 return false;
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            MailSafeApplication.logger.error("Error during Safe Browsing API request: " + e.getMessage(), e);
             return false;
         }
     }
 
     private boolean isMaliciousFile(byte[] fileData) {
-        String host = de.get("CLAMAV_HOST");
-        if (host == null || host.isEmpty()) {
-            host = "localhost";
-        }
-        int port;
-        try {
-            port = Integer.parseInt(de.get("CLAMAV_PORT"));
-        } catch (NumberFormatException | NullPointerException e) {
-            port = 3310;
-        }
-
         // INSTREAM 协议：先发 "zINSTREAM\0"，然后分块发送：4字节大端长度 + 数据块；最后发 0 长度结束
         final int CHUNK = 8192;
 
         try (java.net.Socket socket = new java.net.Socket()) {
-            socket.connect(new java.net.InetSocketAddress(host, port), 3000);
+            socket.connect(new java.net.InetSocketAddress(this.ClamAvHost, ClamAvPort), 3000);
             socket.setSoTimeout(8000);
 
             try (java.io.OutputStream out = socket.getOutputStream();
@@ -211,12 +211,11 @@ public class EmailAnalysisService {
 
     private int AIAnalysis(String rawEmail) throws UnsupportedOperationException {
         // 从环境变量获取 API key 和模型名
-        final String apiKey = de.get("OPENAI_API_KEY");
+        final String apiKey = this.OpenAiApiKey;
         if(apiKey==null || apiKey.isEmpty()){
             throw new UnsupportedOperationException("No OpenAI API key configured.");
         }
         final String endpoint = "https://api.openai.com/v1/chat/completions";
-        final String model = de.get("OPENAI_MODEL","gpt-4o-mini");
 
         // 限制输入长度（避免超时或高费用）
         final String truncated = truncateUtf8(rawEmail, 4096);
@@ -235,7 +234,7 @@ public class EmailAnalysisService {
 
             // 构造请求体
             Map<String, Object> req = new LinkedHashMap<>();
-            req.put("model", model);
+            req.put("model", this.OpenAiModel);
             req.put("temperature", 0.1);
 
             List<Map<String, String>> messages = new ArrayList<>();
@@ -268,7 +267,7 @@ public class EmailAnalysisService {
             try {
                 JsonNode root = om.readTree(resp.body());
                 JsonNode choices = root.path("choices");
-                if (choices.isArray() && choices.size() > 0) {
+                if (choices.isArray() && !choices.isEmpty()) {
                     content = choices.get(0).path("message").path("content").asText();
                 }
             } catch (Exception e) {
@@ -370,7 +369,7 @@ public class EmailAnalysisService {
                 return true;
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            MailSafeApplication.logger.error("Spamhaus check error: " + e.getMessage());
         }
         return false;
     }
