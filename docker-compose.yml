@@ -1,0 +1,31 @@
+version: '3.8'
+services:
+  mailsafe-db:
+    image: mysql:9.0
+    container_name: mailsafe-db
+    environment:
+      MYSQL_DATABASE: MailSafe
+      MYSQL_ROOT_PASSWORD: 20040120Wjy
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u root", "-p 20040120Wjy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mailsafe-app:
+    build: .
+    container_name: mailsafe-app
+    depends_on:
+      mailsafe-db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mailsafe-db:3306/MailSafe
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 20040120Wjy
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      GOOG_SAFE_BROWSING_API_KEY: ${GOOG_SAFE_BROWSING_API_KEY}
